@@ -40,7 +40,7 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
-func handleConnection(w http.ResponseWriter, r *http.Request) {
+func HandleConnection(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		fmt.Println("Failed to upgrade connection:", err)
@@ -83,10 +83,4 @@ func sendToAllClients() {
 			delete(clients, client)
 		}
 	}
-}
-
-func main() {
-	http.HandleFunc("/ws", handleConnection)
-	fmt.Println("WebSocket server started on ws://localhost:8080/ws")
-	http.ListenAndServe(":8080", nil)
 }

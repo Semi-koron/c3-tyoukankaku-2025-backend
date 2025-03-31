@@ -1,4 +1,4 @@
-module github.com/Semikoron/Brachio/backend
+module github.com/Semi-koron/c3-tyoukankaku-2025-backend
 
 go 1.23.6
 
