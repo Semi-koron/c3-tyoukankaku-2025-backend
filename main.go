@@ -19,7 +19,7 @@ func main() {
 	r := mux.NewRouter()
 
 	// ルーム作成用の API
-	r.HandleFunc("/", mult.HandleConnection)
+	r.HandleFunc("/", mult.HandleWebSocket)
 
 	serverAddr := ":8080"
 	fmt.Println("WebSocket server started on", serverAddr)

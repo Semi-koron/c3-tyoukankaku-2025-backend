@@ -2,14 +2,15 @@ package mult
 
 import (
 	"encoding/json"
-	"fmt"
+	"log"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
 
-type SendData struct {
+type PlayerData struct {
 	ID       string  `json:"id"`
 	Color    string  `json:"color"`
 	Position struct {
@@ -26,61 +27,102 @@ type SendData struct {
 	Chat string `json:"chat"`
 }
 
-type ReceiveData []SendData
+var writeMutex sync.Mutex
 
-var (
-	clients   = make(map[*websocket.Conn]bool)
-	dataStore = make(ReceiveData, 0)
-	lock      sync.Mutex
-)
-
+// WebSocket のアップグレーダー
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
+		// allowUrl := os.Getenv("ALLOW_URL")
+		// if allowUrl == "" {
+		// 	allowUrl = "http://localhost:3000"
+		// }
+		// origin := r.Header.Get("Origin")
+		// return origin == allowUrl
 		return true
 	},
 }
 
-func HandleConnection(w http.ResponseWriter, r *http.Request) {
+// ルーム管理
+var roomData = make(map[*websocket.Conn]bool);
+var playerDatas = make(map[*websocket.Conn]PlayerData);
+
+// ルーム内の全員にメッセージを送信
+func sendMessageAll(msg []byte) {
+    writeMutex.Lock()
+    defer writeMutex.Unlock()
+    
+    for client := range roomData {
+        err := client.WriteMessage(websocket.TextMessage, msg)
+        if err != nil {
+            log.Println("Write Error:", err)
+            client.Close()
+            delete(roomData, client)
+        }
+    }
+}
+
+
+// WebSocket 接続を処理
+func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		fmt.Println("Failed to upgrade connection:", err)
+		log.Println("WebSocket Upgrade Error:", err)
 		return
 	}
 	defer conn.Close()
-	clients[conn] = true
+
+	// 参加者を登録
+	roomData[conn] = true
 
 	for {
-		var msg SendData
-		err := conn.ReadJSON(&msg)
+		_, msg, err := conn.ReadMessage()
 		if err != nil {
-			fmt.Println("Error reading message:", err)
-			delete(clients, conn)
+			log.Println("Read Error:", err)
+			delete(roomData, conn)
+			delete(playerDatas, conn) // playerDatas からも削除
 			break
 		}
 
-		lock.Lock()
-		dataStore = append(dataStore, msg)
-		lock.Unlock()
+		// JSON デコード
+		var player PlayerData
+		if err := json.Unmarshal(msg, &player); err != nil {
+			log.Println("JSON Unmarshal Error:", err)
+			continue
+		}
 
-		sendToAllClients()
+		// playerDatas に格納
+		playerDatas[conn] = player
 	}
 }
 
-func sendToAllClients() {
-	lock.Lock()
-	data, err := json.Marshal(dataStore)
-	lock.Unlock()
-	if err != nil {
-		fmt.Println("Error marshalling data:", err)
-		return
-	}
+func sendPlayerDataLoop() {
+	ticker := time.NewTicker(time.Second / 60) // 1秒間に60回
+	defer ticker.Stop()
 
-	for client := range clients {
-		err := client.WriteMessage(websocket.TextMessage, data)
-		if err != nil {
-			fmt.Println("Error sending message:", err)
-			client.Close()
-			delete(clients, client)
+	for {
+		<-ticker.C
+
+		// playerDatas を JSON で扱える形に変換
+		writeMutex.Lock()
+		playerDataMap := make(map[string]PlayerData)
+		for conn, data := range playerDatas {
+			playerDataMap[conn.RemoteAddr().String()] = data
 		}
+		writeMutex.Unlock()
+
+		// JSON に変換
+		data, err := json.Marshal(playerDataMap)
+		if err != nil {
+			log.Println("JSON Marshal Error:", err)
+			continue
+		}
+
+		// すべてのクライアントに送信
+		sendMessageAll(data)
 	}
+}
+
+
+func init() {
+	go sendPlayerDataLoop() // データ送信ループを開始
 }
